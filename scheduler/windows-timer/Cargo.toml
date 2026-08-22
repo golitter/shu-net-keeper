@@ -1,0 +1,17 @@
+[package]
+name = "shu-net-timer"
+version = "0.1.0"
+edition = "2024"
+
+# This is intentionally independent from the GUI workspace in the repository root.
+[workspace]
+
+[dependencies]
+chrono = "0.4"
+num-bigint = "0.4"
+num-traits = "0.2"
+regex = "1.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+urlencoding = "2.1"

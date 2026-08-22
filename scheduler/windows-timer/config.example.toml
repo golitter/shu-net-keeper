@@ -1,0 +1,9 @@
+# 复制为 config.toml 后填写。不要把 config.toml 提交到 Git。
+username = "12345678"
+password = "your_password"
+
+# Windows 中有线网卡的显示名称，可通过 Get-NetAdapter 查看。
+adapter_name = "以太网"
+
+# 单次 HTTP 请求的超时秒数。
+timeout_seconds = 15
