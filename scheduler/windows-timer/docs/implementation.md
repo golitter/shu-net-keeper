@@ -62,12 +62,16 @@ timeout_seconds = 15
 
 ### `ethernet.rs`
 
-通过 Windows PowerShell 的 `Get-NetAdapter` 和 `Get-NetIPAddress`：
+通过 `windows-sys` 直接调用 Windows IP Helper API `GetAdaptersAddresses`：
 
-- 按配置中的显示名称查找适配器；
-- 要求适配器状态为 `Up`；
-- 排除 `169.254.*` 自动私有地址；
-- 选择可用 IPv4 作为所有 curl 请求的本地源地址。
+- 仅请求 IPv4 适配器信息；
+- 使用微软建议的 15 KB 初始缓冲区，并处理 `ERROR_BUFFER_OVERFLOW`；
+- 按 Windows 友好名称匹配配置中的适配器；
+- 要求接口类型为 Ethernet，运行状态为 `Up`；
+- 遍历单播地址并排除 `169.254.*` 链路本地地址和未指定地址；
+- 将选中的 IPv4 作为所有 curl 请求的本地源地址。
+
+该流程不启动 `powershell.exe`，也不依赖 CIM 查询权限。
 
 公网检测地址为：
 
@@ -205,7 +209,10 @@ Working directory: C:\ProgramData\SHUNetTimer
 - release 构建；
 - Windows PowerShell 5.1 脚本解析；
 - 指定以太网 IPv4 且绕过代理的公网直连检测；
+- 在真实 Windows 环境中通过 `GetAdaptersAddresses` 找到“以太网”和正确 IPv4；
 - 计划任务动作、触发器和失败重试参数的内存构造检查。
+
+原 PowerShell 网卡查询版本的单次进程树峰值约为 174.5 MiB、运行约 3.24 秒；改用 Windows API 后实测峰值约为 23.5 MiB、运行约 0.68 秒。Rust 主进程峰值约为 6.3 MiB，其余主要来自短暂运行的 `curl.exe` 和控制台宿主。
 
 ## 9. 已知边界
 

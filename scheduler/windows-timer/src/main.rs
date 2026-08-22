@@ -1,4 +1,5 @@
 mod config;
+mod curl;
 mod ethernet;
 mod login;
 mod rsa;

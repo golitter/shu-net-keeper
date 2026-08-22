@@ -18,7 +18,7 @@ pub fn encrypt_password(password: &str) -> Result<String, Box<dyn std::error::Er
     for chunk in bytes.chunks(chunk_size) {
         let mut block = BigUint::zero();
         for (index, pair) in chunk.chunks(2).enumerate() {
-            let low = pair.first().copied().unwrap_or(0) as u64;
+            let low = pair[0] as u64;
             let high = pair.get(1).copied().unwrap_or(0) as u64;
             block += BigUint::from(low | (high << 8)) << (index * 16);
         }

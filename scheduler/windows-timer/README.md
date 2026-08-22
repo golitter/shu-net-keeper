@@ -1,6 +1,6 @@
 # SHU Windows Ethernet Timer
 
-Windows 专用、无 GUI、非驻留的上海大学校园网定时登录器。每次执行只检查一次，并且所有 HTTP 请求都绑定到指定以太网 IPv4。
+Windows 专用、无 GUI、非驻留的上海大学校园网定时登录器。每次执行只检查一次，通过 Windows IP Helper API 读取指定以太网 IPv4，并将所有 HTTP 请求绑定到该地址。
 
 完整的模块、登录流程、固定部署、任务设置和权限设计见 [`docs/implementation.md`](./docs/implementation.md)。
 
@@ -71,6 +71,7 @@ C:\ProgramData\SHUNetTimer\logs\YYYY-MM-DD.log
 - `config.toml` 包含校园网密码，已被 `.gitignore` 排除；不要提交或分享它。
 - 安装脚本会收紧配置文件权限，并以 `SYSTEM` 运行计划任务，因此需要管理员权限。
 - 程序不会禁用 Wi-Fi；它通过绑定以太网 IPv4，确保检测和登录请求不走 Wi-Fi。
+- 网卡查询由 Rust 直接调用 Windows API 完成，不会为每次检测启动 PowerShell 子进程。
 - 程序会忽略 `_curlrc` 和 `HTTP_PROXY`/`HTTPS_PROXY` 等代理设置，避免校园网请求被发送至 Clash、v2rayN 等本机代理。
 - 门户返回登录成功后，程序会按 2、3、5 秒的间隔验证公网，避免认证状态延迟造成误报。
 - 门户如新增验证码或 MFA，需要另行适配。

@@ -1,10 +1,11 @@
+use crate::curl;
 use crate::rsa;
 use regex::Regex;
 use serde::Deserialize;
 use std::fs;
 use std::io::Write as _;
 use std::net::Ipv4Addr;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::OnceLock;
 use std::thread;
 
@@ -61,7 +62,7 @@ fn login_inner(
         // 原先由 curl --data-urlencode 再编码一次，保持线上格式不变
         urlencoding::encode(&encoded_query)
     );
-    let mut child = Command::new("curl.exe")
+    let mut child = curl::command()
         .args([
             "--disable",
             "--silent",
@@ -101,10 +102,13 @@ fn login_inner(
     let output = child
         .wait_with_output()
         .map_err(|e| format!("等待 curl.exe 退出失败: {e}"))?;
-    if let Err(error) = writer.join().expect("写 stdin 的线程不应 panic") {
-        // curl 可能提前退出导致管道断裂；此时上面的 output 通常也已失败
-        return Err(format!("向 curl.exe 写入表单数据失败: {error}").into());
-    }
+    // curl 可能提前退出（如 --fail 命中 HTTP 错误）导致 stdin 管道断裂，
+    // 因此优先报告 curl 自身的退出状态，stdin 写入失败只作兜底。
+    let stdin_error = writer
+        .join()
+        .expect("写 stdin 的线程不应 panic")
+        .err()
+        .map(|error| format!("向 curl.exe 写入表单数据失败: {error}"));
 
     if !output.status.success() {
         return Err(format!(
@@ -113,10 +117,13 @@ fn login_inner(
         )
         .into());
     }
+    if let Some(error) = stdin_error {
+        return Err(error.into());
+    }
 
-    let body = String::from_utf8_lossy(&output.stdout);
-    let response: LoginResponse =
-        serde_json::from_str(&body).map_err(|e| format!("无法解析登录响应: {e}; 响应={body}"))?;
+    let response_text = String::from_utf8_lossy(&output.stdout);
+    let response: LoginResponse = serde_json::from_str(&response_text)
+        .map_err(|e| format!("无法解析登录响应: {e}; 响应={response_text}"))?;
     if response.result == "success" {
         Ok(())
     } else {
@@ -134,7 +141,7 @@ fn curl_get(
     cookie_file: &std::path::Path,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let cookie_path = cookie_file.to_string_lossy();
-    let output = Command::new("curl.exe")
+    let output = curl::command()
         .args([
             "--disable",
             "--silent",
