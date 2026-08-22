@@ -132,13 +132,22 @@ Enable-ScheduledTask -TaskName 'SHU Net Keeper (Ethernet)'
 
 重新插入网线，等待 Windows 获得 IPv4 后再次运行测试脚本。
 
-## 7. 计划任务重试测试
+## 7. 计划任务安装与重试测试
 
 该测试要求已经使用管理员 PowerShell 安装任务：
 
 ```powershell
 .\scripts\install-task.ps1
 ```
+
+安装成功后会立即在后台执行一次检测。连续运行两次安装命令，第二次也应正常覆盖文件、更新任务并启动检测，不应出现 `Copy-Item` 权限错误或任务 XML 时长错误：
+
+```powershell
+.\scripts\install-task.ps1
+.\scripts\install-task.ps1
+```
+
+两次即时检测都会写入当天日志。同一时刻如果已有检测仍在运行，任务计划程序使用 `IgnoreNew` 避免创建重叠实例。
 
 测试步骤：
 
