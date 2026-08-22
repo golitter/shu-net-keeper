@@ -21,10 +21,20 @@ $installDir = Join-Path $programData 'SHUNetTimer'
 $installedExecutable = Join-Path $installDir 'shu-net-timer.exe'
 $installedConfig = Join-Path $installDir 'config.toml'
 
-# Stop an existing task before replacing its executable.
+# Stop an existing task before replacing its executable, and wait for the process to exit
+# so the file copy below does not race with a still-running instance.
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existingTask -and $existingTask.State -eq 'Running') {
     Stop-ScheduledTask -TaskName $taskName
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+        if ($state -ne 'Running') { break }
+        Start-Sleep -Milliseconds 200
+    }
+    if ((Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State -eq 'Running') {
+        throw "Scheduled task '$taskName' is still running; cannot replace its executable."
+    }
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -43,7 +53,11 @@ $action = New-ScheduledTaskAction `
     -Argument ('--config "{0}"' -f $installedConfig) `
     -WorkingDirectory $installDir
 
-$daily = New-ScheduledTaskTrigger -Daily -At '12:00'
+# Start one minute after installation, then repeat every 30 minutes forever.
+$firstRun = (Get-Date).AddMinutes(1)
+$continuous = New-ScheduledTaskTrigger -Once -At $firstRun `
+    -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration ([TimeSpan]::MaxValue)
 $startup = New-ScheduledTaskTrigger -AtStartup
 $startup.Delay = 'PT1M'
 
@@ -60,10 +74,10 @@ $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccou
 Register-ScheduledTask `
     -TaskName $taskName `
     -Action $action `
-    -Trigger @($daily, $startup) `
+    -Trigger @($continuous, $startup) `
     -Settings $settings `
     -Principal $principal `
-    -Description 'Check and restore SHU Ethernet connectivity daily and after Windows starts.' `
+    -Description 'Check and restore SHU Ethernet connectivity every 30 minutes and after Windows starts.' `
     -Force | Out-Null
 
 Write-Host "Scheduled task installed: $taskName"
@@ -71,5 +85,7 @@ Write-Host "Install directory: $installDir"
 Write-Host "Executable: $installedExecutable"
 Write-Host "Config: $installedConfig"
 Write-Host "Logs: $(Join-Path $installDir 'logs')"
+Write-Host "First scheduled run: $firstRun"
+Write-Host 'Repeat interval: 30 minutes (indefinitely)'
 Write-Host 'Run this command to start it immediately:'
 Write-Host "Start-ScheduledTask -TaskName '$taskName'"

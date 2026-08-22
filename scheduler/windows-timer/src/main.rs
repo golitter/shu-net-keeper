@@ -13,6 +13,7 @@ use std::thread;
 use std::time::Duration;
 
 const POST_LOGIN_RETRY_DELAYS: [u64; 3] = [2, 3, 5];
+const LOG_RETENTION_DAYS: i64 = 30;
 
 fn main() {
     if let Err(error) = run() {
@@ -80,10 +81,32 @@ fn log_line(message: &str) {
     {
         let log_dir = dir.join("logs");
         if fs::create_dir_all(&log_dir).is_ok() {
+            cleanup_old_logs(&log_dir, &timestamp);
             let path = log_dir.join(format!("{}.log", timestamp.format("%Y-%m-%d")));
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
                 let _ = writeln!(file, "{line}");
             }
+        }
+    }
+}
+
+/// 删除超过保留期（按文件名日期判断）的旧日志，失败时静默跳过。
+fn cleanup_old_logs(log_dir: &Path, now: &chrono::DateTime<Local>) {
+    let cutoff = now.date_naive() - chrono::Duration::days(LOG_RETENTION_DAYS);
+    let Ok(entries) = fs::read_dir(log_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let file_name = name.to_string_lossy();
+        let Some(stem) = file_name.strip_suffix(".log") else {
+            continue;
+        };
+        if stem
+            .parse::<chrono::NaiveDate>()
+            .is_ok_and(|date| date < cutoff)
+        {
+            let _ = fs::remove_file(entry.path());
         }
     }
 }

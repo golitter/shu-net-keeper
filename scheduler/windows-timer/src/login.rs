@@ -2,8 +2,11 @@ use crate::rsa;
 use regex::Regex;
 use serde::Deserialize;
 use std::fs;
+use std::io::Write as _;
 use std::net::Ipv4Addr;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+use std::thread;
 
 const GATEWAY: &str = "http://10.10.9.9";
 const LOGIN_URL: &str = "http://10.10.9.9/eportal/InterFace.do?method=login";
@@ -22,8 +25,14 @@ pub fn login(
     local_ip: Ipv4Addr,
     timeout_seconds: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let cookie_file =
-        std::env::temp_dir().join(format!("shu-net-timer-cookie-{}.txt", std::process::id()));
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let cookie_file = std::env::temp_dir().join(format!(
+        "shu-net-timer-cookie-{}-{nonce}.txt",
+        std::process::id()
+    ));
     let result = login_inner(username, password, local_ip, timeout_seconds, &cookie_file);
     let _ = fs::remove_file(cookie_file);
     result
@@ -44,7 +53,15 @@ fn login_inner(
     let cookie_path = cookie_file.to_string_lossy();
     let referer = format!("http://10.10.9.9/eportal/index.jsp?{query}");
 
-    let output = Command::new("curl.exe")
+    // 通过 stdin 传递表单数据，避免凭据出现在 curl 的命令行里（进程命令行对其他进程可见）。
+    let body = format!(
+        "userId={}&password={}&service=shu&passwordEncrypt=true&operatorPwd=&operatorUserId=&validcode=&queryString={}",
+        urlencoding::encode(username),
+        urlencoding::encode(&encrypted),
+        // 原先由 curl --data-urlencode 再编码一次，保持线上格式不变
+        urlencoding::encode(&encoded_query)
+    );
+    let mut child = Command::new("curl.exe")
         .args([
             "--disable",
             "--silent",
@@ -66,26 +83,28 @@ fn login_inner(
             &referer,
             "--header",
             "Accept: */*",
-            "--data-urlencode",
-            &format!("userId={username}"),
-            "--data-urlencode",
-            &format!("password={encrypted}"),
-            "--data-urlencode",
-            "service=shu",
-            "--data-urlencode",
-            "passwordEncrypt=true",
-            "--data-urlencode",
-            "operatorPwd=",
-            "--data-urlencode",
-            "operatorUserId=",
-            "--data-urlencode",
-            "validcode=",
-            "--data-urlencode",
-            &format!("queryString={encoded_query}"),
+            "--header",
+            "Content-Type: application/x-www-form-urlencoded",
+            "--data-binary",
+            "@-",
             LOGIN_URL,
         ])
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("无法启动 Windows curl.exe: {e}"))?;
+    // 在独立线程写 stdin：若 curl 在读完 stdin 前写满 stdout/stderr 管道，
+    // 同步写会和 wait_with_output 的读取互相等待造成死锁。
+    let mut stdin_handle = child.stdin.take().expect("stdin 已被 piped");
+    let writer = thread::spawn(move || stdin_handle.write_all(body.as_bytes()));
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("等待 curl.exe 退出失败: {e}"))?;
+    if let Err(error) = writer.join().expect("写 stdin 的线程不应 panic") {
+        // curl 可能提前退出导致管道断裂；此时上面的 output 通常也已失败
+        return Err(format!("向 curl.exe 写入表单数据失败: {error}").into());
+    }
 
     if !output.status.success() {
         return Err(format!(
@@ -149,7 +168,10 @@ fn curl_get(
 }
 
 fn extract_query_string(html: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let re = Regex::new(r#"location\.href\s*=\s*['\"]([^'\"]+)['\"]"#)?;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"location\.href\s*=\s*['\"]([^'\"]+)['\"]"#).expect("静态正则必然合法")
+    });
     let url = re
         .captures(html)
         .and_then(|captures| captures.get(1))
