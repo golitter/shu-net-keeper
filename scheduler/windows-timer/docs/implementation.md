@@ -16,7 +16,8 @@ scheduler/
     ├── config.example.toml
     ├── README.md
     ├── docs/
-    │   └── implementation.md
+    │   ├── implementation.md
+    │   └── testing.md
     ├── scripts/
     │   ├── test-now.ps1
     │   ├── logout-now.ps1
@@ -24,6 +25,7 @@ scheduler/
     │   └── uninstall-task.ps1
     └── src/
         ├── config.rs
+        ├── curl.rs
         ├── ethernet.rs
         ├── login.rs
         ├── main.rs
@@ -46,7 +48,7 @@ scheduler/
 6. 登录请求成功后分别等待 2、3、5 秒，最多进行三次公网验证；
 7. 成功返回退出码 `0`，失败返回非零退出码。
 
-日志写入可执行文件所在目录的 `logs/YYYY-MM-DD.log`。
+日志写入可执行文件所在目录的 `logs/YYYY-MM-DD.log`。每次写日志时会按文件名日期清理超过 30 天的旧 `.log` 文件；其他名称的文件不会被删除。
 
 ### `config.rs`
 
@@ -92,6 +94,16 @@ curl 调用包含：
 
 其中 `--disable` 忽略用户 `_curlrc`，`--noproxy "*"` 跳过 Clash、v2rayN 等系统或环境代理，`--interface` 将请求绑定到指定以太网 IPv4。
 
+### `curl.rs`
+
+集中创建所有 curl 子进程。程序不会通过 `PATH` 搜索同名命令，而是根据 `SystemRoot` 组装：
+
+```text
+<SystemRoot>\System32\curl.exe
+```
+
+这可以减少普通 `PATH` 同名程序截获请求参数的风险。HTTP 仍由独立的系统 `curl.exe` 子进程执行，并非 Rust 进程内 HTTP 客户端。
+
 ### `login.rs`
 
 登录流程与学校 ePortal 页面一致：
@@ -103,7 +115,9 @@ curl 调用包含：
 5. 保持 GET 阶段产生的 Cookie；
 6. 向 `/eportal/InterFace.do?method=login` 提交表单；
 7. 固定提交 `service=shu` 和 `passwordEncrypt=true`；
-8. 解析 JSON 响应中的 `result` 和 `message`。
+8. 登录表单正文通过子进程 stdin 传入，用户名和加密密码不会出现在 curl 命令行；
+9. 使用独立写入线程和 `wait_with_output` 同时处理 stdin、stdout 和 stderr，避免管道互相等待；
+10. 解析 JSON 响应中的 `result` 和 `message`。
 
 程序不会写死成功页中的 `userIndex`，也不打开浏览器。
 
@@ -116,7 +130,7 @@ curl 调用包含：
 - 按门户算法进行零填充、分块和模幂计算；
 - 用单元测试验证输出与原项目的已知结果完全一致。
 
-## 4. 立即测试脚本
+## 4. 测试与注销脚本
 
 `scripts/test-now.ps1` 不创建或修改计划任务，可以在安装前立即执行一次完整流程。
 
@@ -131,6 +145,15 @@ curl 调用包含：
 所有 PowerShell 脚本均使用纯 ASCII 内容，以兼容 Windows PowerShell 5.1 对无 BOM UTF-8 脚本的处理。
 
 `scripts/logout-now.ps1` 用于真实登录测试。它通过门户的 `getOnlineUserInfo` 动态取得当前 `userIndex`，确认后向 `InterFace.do?method=logout` 提交注销请求。脚本不读取校园网密码，不断开以太网，并在注销后检查在线会话是否已经消失。
+
+门户返回 UTF-8 JSON，而 Windows PowerShell 5.1 会按当前系统代码页解释原生命令标准输出。为防止中文字段变成乱码并破坏 JSON，脚本让 curl 将原始响应写入随机临时文件，再使用 `[Text.Encoding]::UTF8` 显式读取，最后在 `finally` 中删除临时文件。
+
+注销脚本提供两种安全控制：
+
+- `-CheckOnly`：只确认以太网和在线会话，不发送注销请求；
+- 默认模式：要求手工输入大写 `YES` 后才执行注销；`-Force` 可供明确需要的自动化调用跳过确认。
+
+完整测试操作见 [`testing.md`](./testing.md)。
 
 ## 5. 固定部署与计划任务
 
@@ -211,6 +234,8 @@ Working directory: C:\ProgramData\SHUNetTimer
 - `cargo clippy --all-targets -- -D warnings`；
 - release 构建；
 - Windows PowerShell 5.1 脚本解析；
+- 注销脚本 `-CheckOnly` 实机验证；
+- 门户 UTF-8 JSON 原始字节读取与解析；
 - 指定以太网 IPv4 且绕过代理的公网直连检测；
 - 在真实 Windows 环境中通过 `GetAdaptersAddresses` 找到“以太网”和正确 IPv4；
 - 计划任务动作、触发器和失败重试参数的内存构造检查。
@@ -225,3 +250,5 @@ Working directory: C:\ProgramData\SHUNetTimer
 - ePortal 地址、RSA 公钥或页面结构变化时需要更新代码；
 - 公网状态目前只使用一个微软检测地址；
 - 凭据尚未使用 Windows DPAPI 加密。
+- HTTP 仍依赖 Windows 自带的 `curl.exe` 子进程，尚未达到完全进程内 HTTP；
+- `curl.rs` 的系统目录基于进程环境中的 `SystemRoot`，不是通过 `GetSystemDirectoryW` 获取。

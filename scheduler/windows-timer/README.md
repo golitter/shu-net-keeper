@@ -2,7 +2,7 @@
 
 Windows 专用、无 GUI、非驻留的上海大学校园网定时登录器。每次执行只检查一次，通过 Windows IP Helper API 读取指定以太网 IPv4，并将所有 HTTP 请求绑定到该地址。
 
-完整的模块、登录流程、固定部署、任务设置和权限设计见 [`docs/implementation.md`](./docs/implementation.md)。
+完整的模块、登录流程、固定部署、任务设置和权限设计见 [`docs/implementation.md`](./docs/implementation.md)，真实注销登录和断线测试见 [`docs/testing.md`](./docs/testing.md)。
 
 ## 使用
 
