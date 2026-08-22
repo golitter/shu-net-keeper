@@ -9,5 +9,6 @@
 - 实现说明：[`windows-timer/docs/implementation.md`](./windows-timer/docs/implementation.md)
 - 使用说明：[`windows-timer/README.md`](./windows-timer/README.md)
 - 立即测试：`windows-timer/scripts/test-now.ps1`
+- 注销认证：`windows-timer/scripts/logout-now.ps1`
 - 安装任务：`windows-timer/scripts/install-task.ps1`
 - 卸载任务：`windows-timer/scripts/uninstall-task.ps1`

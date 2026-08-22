@@ -23,6 +23,18 @@ cargo build --release
 
 如果 release 程序还不存在，测试脚本会先执行 `cargo build --release`。测试退出码为 `0` 表示以太网原本正常，或者校园网登录后已经恢复联网；非零表示测试失败。
 
+需要测试真实的自动登录流程时，先注销当前校园网门户会话：
+
+```powershell
+.\scripts\logout-now.ps1
+```
+
+脚本动态读取当前会话的 `userIndex`，输入 `YES` 后只注销门户认证，不断开以太网。注销成功后立即运行 `test-now.ps1`：
+
+```powershell
+.\scripts\test-now.ps1
+```
+
 确认日志结果正常后，以管理员身份运行：
 
 ```powershell

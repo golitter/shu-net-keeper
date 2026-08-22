@@ -19,6 +19,7 @@ scheduler/
     │   └── implementation.md
     ├── scripts/
     │   ├── test-now.ps1
+    │   ├── logout-now.ps1
     │   ├── install-task.ps1
     │   └── uninstall-task.ps1
     └── src/
@@ -127,7 +128,9 @@ curl 调用包含：
 - 原样返回 Rust 程序的退出码；
 - 输出日志目录。
 
-三个 PowerShell 脚本均使用纯 ASCII 内容，以兼容 Windows PowerShell 5.1 对无 BOM UTF-8 脚本的处理。
+所有 PowerShell 脚本均使用纯 ASCII 内容，以兼容 Windows PowerShell 5.1 对无 BOM UTF-8 脚本的处理。
+
+`scripts/logout-now.ps1` 用于真实登录测试。它通过门户的 `getOnlineUserInfo` 动态取得当前 `userIndex`，确认后向 `InterFace.do?method=logout` 提交注销请求。脚本不读取校园网密码，不断开以太网，并在注销后检查在线会话是否已经消失。
 
 ## 5. 固定部署与计划任务
 
