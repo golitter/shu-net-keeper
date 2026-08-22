@@ -1,3 +1,11 @@
+# Windows 以太网定时器版
+
+Windows 专用、无 GUI、低占用，通过任务计划程序每 30 分钟检测以太网，并在断网时自动登录校园网。
+
+安装、配置、测试及实现说明请查看：[Windows 定时器版完整文档](scheduler/windows-timer/README.md)。
+
+---
+
 # SHU Net Keeper
 
 <div style="text-align: center">
