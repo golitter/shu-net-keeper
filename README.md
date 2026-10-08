@@ -1,10 +1,18 @@
-# Windows 以太网定时器版
+# 独立后台工具
+
+提供 Windows 和 macOS 两个独立版本，均无需 Tauri 或图形界面。
+
+## Windows 以太网定时器版
 
 Windows 专用、无 GUI、低占用，通过任务计划程序每 30 分钟检测以太网，并在断网时自动登录校园网。
 
 安装、配置、测试及实现说明请查看：[Windows 定时器版完整文档](scheduler/windows-timer/README.md)。
 
-macOS 用户可使用独立于 Tauri 的 [WiFi 启动／唤醒登录服务](scheduler/macos-wifi/README.md)：登录桌面或开盖唤醒时检测指定 WiFi，连接后自动认证，使用私有 `config.toml` 配置。
+## macOS WiFi 启动／唤醒登录服务
+
+登录 macOS 桌面或开盖唤醒时检测指定 WiFi，连接后自动认证；已连接、已登录时跳过对应操作。使用私有 `config.toml` 配置，支持校园网认证流量绕过 VPN／代理。
+
+安装、权限设置、配置和测试请查看：[macOS WiFi 服务完整文档](scheduler/macos-wifi/README.md)。
 
 ---
 
@@ -29,6 +37,8 @@ macOS 用户可使用独立于 Tauri 的 [WiFi 启动／唤醒登录服务](sche
 你是否也有过这样的经历：正在安静地写代码或看视频，校园网突然断开，不得不放下手中的事情去重新登录？对于使用 Linux 服务器或长期需要远程桌面服务的小伙伴来说更是如此。我们都有过这样的困扰——这就是这个项目的由来。一个简单却实用的工具，持续守护你的网络连接，断线自动重连，让你专注于真正重要的事。
 
 ## 功能特性
+
+以下功能特性及后续 GUI、CLI、部署章节介绍主项目。上方两个独立后台工具的触发方式、配置字段和安装方式以各自文档为准；它们不包含主项目的邮件通知等全部功能。
 
 - 🖥️ **跨平台支持** - 支持 Windows、macOS、Linux 三大主流操作系统
 - 🔄 **自动登录** - 定期检查网络状态，断网时自动重新登录
@@ -176,7 +186,9 @@ receiver = "notify@example.com"
 
 > 💡 如果需要后台运行且开机自启，请参考本文档「部署方式」章节。
 
-## 部署方式
+## 部署方式（主项目 CLI）
+
+本节用于持续轮询的 `shu-net-keeper` CLI。Windows 以太网定时器请使用 [Windows 安装说明](scheduler/windows-timer/README.md)，macOS 开机／开盖 WiFi 服务请使用 [macOS 安装说明](scheduler/macos-wifi/README.md)，无需再配置本节的登录项或其他自启动方式。
 
 ### Windows 系统
 
@@ -428,9 +440,9 @@ docker restart shu-net-keeper
 请前往 [GitHub Issues](https://github.com/beiningwu/shu-net-keeper/issues) 提交，并尽量包含以下信息：
 
 - 操作系统和版本
-- 使用的是 CLI 版本还是 GUI 版本
+- 使用的版本：主项目 CLI／GUI、Windows 以太网定时器或 macOS WiFi 服务
 - 问题的复现步骤
-- 相关日志输出（CLI：`logs/` 目录；GUI：日志面板内容）
+- 相关日志输出（主项目 CLI：`logs/`；GUI：日志面板；Windows 定时器及 macOS WiFi 服务：各自文档中的日志路径）。分享前移除账号、IP 和会话标识，不要附上私有配置文件。
 
 ### 提交代码
 
@@ -447,7 +459,7 @@ docker restart shu-net-keeper
 
 ### 从源码构建
 
-**前置要求**：Rust 1.70+，Cargo
+**前置要求**：支持项目所用 Edition 2024 和标准库 API 的近期 stable Rust/Cargo；Rust 1.70 已不适用。macOS 独立服务还需要 Xcode Command Line Tools。两个独立工具不依赖 Tauri CLI，构建方式见各自文档。
 
 ```bash
 # 克隆仓库
@@ -476,4 +488,4 @@ cargo test
 cargo tauri dev
 ```
 
-详细架构说明请参阅 [CLAUDE.md](CLAUDE.md)（面向开发者的项目指引）。
+独立后台工具的结构和操作入口见 [scheduler 文档](scheduler/README.md)，Windows 实现细节见 [实现说明](scheduler/windows-timer/docs/implementation.md)，macOS 架构、权限和路由维护见 [服务文档](scheduler/macos-wifi/README.md)。

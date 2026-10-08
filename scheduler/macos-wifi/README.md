@@ -1,13 +1,13 @@
 # macOS WiFi 启动／唤醒登录服务
 
-独立于 Tauri 的 macOS 后台服务。登录系统后启动，开盖唤醒时再次检测；附近存在指定 SSID 时连接 WiFi，再使用学号和校园网密码完成 ePortal 认证。平时等待系统事件，不定时轮询。
+独立于 Tauri 的 macOS 后台服务。登录系统后启动，开盖唤醒时再次检测；附近存在指定 SSID 时连接 WiFi，再使用学号和校园网密码完成 ePortal 认证。WiFi 检测服务平时等待系统事件，不定时轮询；可选的特权路由维护器每 15 秒检查一次路由。
 
 ## 运行方式
 
 - Swift 使用 AppKit 监听系统睡眠、唤醒，使用 CoreWLAN 扫描和连接 WiFi，使用 CoreLocation 请求读取 SSID 所需的定位权限。
 - Rust worker 读取私有 `config.toml`，检查校园网在线状态并认证，复用仓库 `src/rsa.rs` 的 RSA 算法和 `src/constants.rs` 的门户地址。
 - 无窗口、无托盘、无 Tauri 依赖。`.app` 只是承载 macOS 权限说明和应用身份的原生包。
-- 用户级 LaunchAgent 在**用户登录桌面后**运行，不在登录前运行。合盖后开盖引发系统唤醒时触发；仅打开盖子而系统未睡眠不会触发。
+- 用户级 LaunchAgent 在**用户登录桌面后**运行，不在登录前运行。关机后开机和重新启动都适用；从系统启动到用户会话建立的时间不属于连接耗时。合盖后开盖引发系统唤醒时触发；仅打开盖子而系统未睡眠不会触发。
 - 开机或唤醒后先等 3 秒，最多检测 `attempts` 次。目标 WiFi 不存在时也只进行这几次短重试，然后等待下次事件。
 - 目标网络已连接则直接检查；附近找到目标网络但当前连接其他 WiFi 时，会切换到目标网络。WiFi 被手动关闭时跳过，不自动打开开关。
 - 等待 DHCP 最多 15 秒／次；所有门户请求有超时。已在线则不重复登录；门户明确拒绝账号认证则停止本次重试。
@@ -17,7 +17,13 @@
 
 需要 macOS 13 或更高版本、Rust/Cargo 和 Xcode Command Line Tools（`xcode-select --install`）。构建和用户级服务安装不需要 Tauri、Node 或管理员权限；VPN/TUN 下的专用路由维护器需要一次管理员安装。
 
-在本目录执行：
+以下命令除特别说明外，均从仓库根目录进入本目录后执行：
+
+```bash
+cd scheduler/macos-wifi
+```
+
+首次创建私有配置：
 
 ```bash
 cp config.example.toml config.toml
@@ -46,9 +52,14 @@ timeout_seconds = 10
 ## 构建和安装
 
 ```bash
-bash scripts/build.sh
+# VPN/TUN 可能接管校园网关路由时，先安装专用路由维护器（一次管理员授权）
+sudo bash scripts/install-direct-route.sh
+
+# 安装用户级 WiFi 服务（不要加 sudo；脚本会自动构建）
 bash scripts/install.sh "$PWD/config.toml"
 ```
+
+没有 VPN/TUN 且 WiFi 已有可用直连路由时，可以跳过第一条命令。只需要构建、不安装或启动服务时执行 `bash scripts/build.sh`，产物位于 `dist/SHU WiFi Keeper.app`。
 
 安装脚本会先构建并验证配置，然后安装到：
 
@@ -59,7 +70,9 @@ bash scripts/install.sh "$PWD/config.toml"
 ~/Library/Logs/SHUWiFiKeeper/service.log
 ```
 
-随后启动用户级 LaunchAgent。配置目录权限为 `700`，配置文件为 `600`。再次安装会更新程序；覆盖已有配置前保留 `config.toml.backup`。不传配置路径时使用已安装的配置。不要使用 `sudo`。
+随后启动用户级 LaunchAgent。配置目录权限为 `700`，配置文件为 `600`。再次安装会更新程序；覆盖已有配置前保留 `config.toml.backup`。不传配置路径时使用已安装的配置。`install.sh` 不使用 `sudo`，特权路由维护器的安装脚本使用 `sudo`。
+
+安装后无需手动运行：重启并登录 macOS 后自动启动，合盖睡眠后开盖自动检测。安装脚本将源码目录中的配置**复制**到上述安装位置；安装后只修改源码目录的 `config.toml` 不会改变当前服务配置，需要重新安装或直接编辑安装后的文件。
 
 首次运行请允许 **SHU WiFi Keeper 的定位权限**，以读取附近 WiFi 名称；系统要求本地网络权限时也请允许，以访问校园网关。如果没有看到定位提示，可先停止服务，然后从应用包请求授权：
 
@@ -84,7 +97,7 @@ SHU_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/bu
 
 ### VPN／代理隔离
 
-所有校园网状态检测、网关 GET、认证 POST 和登录验证都使用系统 curl，并删除大小写代理环境变量、忽略 `.curlrc`、显式设置空代理和 `--noproxy '*'`。请求绑定 `if!en0`（实际 WiFi 接口由系统查询），每次请求前检查 WiFi IP 与接口专用路由。不会退回 VPN 默认路由。
+所有校园网状态检测、网关 GET、认证 POST 和登录验证都使用系统 curl，并删除大小写代理环境变量、忽略 `.curlrc`、显式设置空代理和 `--noproxy '*'`。请求绑定 `if!en0`（实际 WiFi 接口由系统查询），在线状态查询和认证提交前检查 WiFi IP 与接口专用路由。不会退回 VPN 默认路由。
 
 VPN/TUN 若删除了 WiFi 默认路由，单独跳过 HTTP 代理不足以完成连接。安装固定目标的路由维护器：
 
@@ -117,6 +130,21 @@ launchctl print "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
 tail -f "$HOME/Library/Logs/SHUWiFiKeeper/service.log"
 ```
 
+立即触发一次检测（不注销校园网、不关闭 WiFi）：
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
+```
+
+### 分别验证连接、唤醒和认证
+
+- **开机／重启**：登录桌面后查看新的“程序启动／权限已就绪”记录，以及在线状态或登录结果。
+- **合盖／开盖**：应出现“系统进入睡眠”和“系统唤醒”记录。合盖不保证校园网认证失效；“已登录校园网，无需重复认证”同样是成功结果。
+- **热点切换**：先手动连接手机热点，再触发检测。若附近存在目标 SSID，服务会切换回校园 WiFi；目标不存在时有限重试后保留现有连接。这项测试不保证产生新的认证请求。
+- **真实认证**：保持校园 WiFi 连接，在校园网门户 `http://10.10.9.9` 主动注销会话，再触发检测；预期出现“校园网登录成功，在线状态已验证”。浏览器没有服务的专用接口绑定，VPN/TUN 开启时可能无法直接访问门户。Windows 的 `logout-now.ps1` 不适用于 macOS，本版本尚未提供独立注销脚本。
+
+日志中的 `[...Z]` 时间戳为 UTC，北京时间需加 8 小时。Rust worker 的结果行没有时间戳，可结合前面的启动／唤醒记录判断所属检测。确认“发现目标 WiFi”或“请求已隔离代理”还不足以认定认证成功，应检查后续在线状态或成功记录。
+
 一次完整的手动连接／登录测试，需要先停止后台服务，避免实例锁冲突：
 
 ```bash
@@ -133,19 +161,34 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.shu-net-keepe
 
 ## 修改配置和卸载
 
-修改配置后重启，让 WiFi 设置和认证凭据同时重新载入：
+编辑安装后的配置文件，而不是只编辑源码目录中的副本：
+
+```bash
+open -e "$HOME/Library/Application Support/SHUWiFiKeeper/config.toml"
+```
+
+修改后重启，让 WiFi 设置和认证凭据同时重新载入，也会立即触发一次检测：
 
 ```bash
 launchctl kickstart -k "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
 ```
 
-卸载自动启动：
+卸载用户级自动启动；如果安装过专用路由维护器，也执行第二条命令：
 
 ```bash
 bash scripts/uninstall.sh
+sudo bash scripts/uninstall-direct-route.sh
 ```
 
-卸载会停止服务，把 LaunchAgent 文件改名为 `.plist.disabled`，保留应用、私有配置和日志，可重新安装恢复。
+用户级卸载会停止服务，把 LaunchAgent 文件改名为 `.plist.disabled`，保留应用、私有配置和日志，可重新安装恢复。路由维护器的卸载会停止 LaunchDaemon、移除当前 WiFi 接口的校园网关专用路由，并保留辅助文件和日志。
+
+## 常见问题
+
+- **“附近未发现目标 WiFi”**：核对 SSID 的大小写、空格和括号，例如 `Shu(ForAll)` 与 `Shu(ForALL)` 不同；检查定位权限和实际信号范围。
+- **“缺少校园网关的 WiFi 专用路由”**：按上面的 VPN／代理隔离步骤安装维护器，检查 `sudo launchctl print system/com.shu-net-keeper.macos-wifi.direct-route`。它是周期性单次任务，两次运行之间显示 `state = not running` 正常，应同时检查 `last exit code`。
+- **“校园网请求失败（curl 退出码 Some(7)）”**：连接网关失败，尚不能归因于账号密码。检查 WiFi 是否获取 IP、专用路由是否可用及本地网络权限，不要仅重复修改密码。
+- **开盖后仍显示已登录**：无需重连或重新认证。合盖多久会失去无线关联或校园网会话没有固定保证，开盖时也可能已由系统恢复连接。
+- **私有配置或日志管理**：密码仍以明文保存在受权限保护的 TOML 中，不属于加密存储；请勿分享配置。当前日志不自动轮转。
 
 ## 系统接口参考
 

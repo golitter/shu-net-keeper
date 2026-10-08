@@ -2,6 +2,8 @@
 
 Windows 专用、无 GUI、非驻留的上海大学校园网定时登录器。每次执行只检查一次，通过 Windows IP Helper API 读取指定以太网 IPv4，并将所有 HTTP 请求绑定到该地址。
 
+macOS 的开机／开盖 WiFi 自动登录请使用 [macOS WiFi 服务](../macos-wifi/README.md)。两个版本分别安装和配置，本版本不扫描或切换 WiFi；日志中的 `Shu(ForAll)` 是校园网认证提示，不是 WiFi 匹配条件。
+
 完整的模块、登录流程、固定部署、任务设置和权限设计见 [`docs/implementation.md`](./docs/implementation.md)，真实注销登录和断线测试见 [`docs/testing.md`](./docs/testing.md)。
 
 ## 使用

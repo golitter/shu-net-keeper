@@ -13,8 +13,6 @@
 
 ## 2. 测试前准备
 
-进入项目目录：
-
 从仓库根目录进入：
 
 ```powershell
@@ -195,7 +193,7 @@ cargo build --release
 
 ### `Get-NetAdapter` 拒绝访问
 
-定时运行的 Rust 程序直接使用 Windows API，不调用 `Get-NetAdapter`。只有一次性的注销 PowerShell 脚本使用该命令；如果桌面 PowerShell受到策略限制，可以使用管理员 PowerShell运行注销测试。
+定时运行的 Rust 程序直接使用 Windows API，不调用 `Get-NetAdapter`。只有一次性的注销 PowerShell 脚本使用该命令；如果桌面 PowerShell 受到策略限制，可以使用管理员 PowerShell 运行注销测试。
 
 ## 9. 测试后的日志
 
