@@ -4,6 +4,8 @@ Windows 专用、无 GUI、低占用，通过任务计划程序每 30 分钟检�
 
 安装、配置、测试及实现说明请查看：[Windows 定时器版完整文档](scheduler/windows-timer/README.md)。
 
+macOS 用户可使用独立于 Tauri 的 [WiFi 启动／唤醒登录服务](scheduler/macos-wifi/README.md)：登录桌面或开盖唤醒时检测指定 WiFi，连接后自动认证，使用私有 `config.toml` 配置。
+
 ---
 
 # SHU Net Keeper

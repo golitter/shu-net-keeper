@@ -1,0 +1,11 @@
+# 必须与 macOS WiFi 菜单中的名称完全一致（大小写、括号和空格）。
+ssid = "Shu(ForAll)"
+username = "your_student_id"
+password = "your_campus_password"
+
+# 开放 WiFi 不需要此项。仅用于 WiFi 本身的 WPA 密码，不是校园网密码。
+# wifi_password = "your_wifi_password"
+
+attempts = 4
+retry_seconds = 5
+timeout_seconds = 10

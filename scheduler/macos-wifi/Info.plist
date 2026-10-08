@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.shu-net-keeper.macos-wifi</string>
+  <key>CFBundleName</key><string>SHU WiFi Keeper</string>
+  <key>CFBundleDisplayName</key><string>SHU WiFi Keeper</string>
+  <key>CFBundleExecutable</key><string>shu-wifi-service</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSLocationUsageDescription</key><string>读取附近 WiFi 名称，在启动或唤醒时连接指定的上海大学校园 WiFi 并自动认证；不会保存或上传地理位置。</string>
+  <key>NSLocalNetworkUsageDescription</key><string>访问上海大学校园网关，检查在线状态并完成校园网认证。</string>
+</dict></plist>
