@@ -106,7 +106,7 @@ sudo bash scripts/install-direct-route.sh
 launchctl kickstart -k "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
 ```
 
-维护器是 root 拥有的 LaunchDaemon，每 15 秒检查路由，无 WiFi 扫描或校园网 HTTP 请求。只维护 `10.10.9.9/32` 的 **WiFi 接口专用路由**，网关从 WiFi DHCP 自动读取；不修改 VPN 默认路由或系统代理。接口、IP 或网关变化时自动重新检查。没有可用的 WiFi 专用路由时，主服务报告明确原因并跳过认证。
+维护器是 root 拥有的 LaunchDaemon，每 15 秒检查路由，无 WiFi 扫描或校园网 HTTP 请求。只维护 `10.10.9.9/32` 的 **WiFi 接口专用路由**，网关从 WiFi DHCP 自动读取；不修改 VPN 默认路由或系统代理。WiFi 接口或网关变化时自动重新检查（WiFi IP 由主服务在认证前核对）。没有可用的 WiFi 专用路由时，主服务报告明确原因并跳过认证。
 
 root 维护器不读取用户配置或凭据，不接受来自用户文件的目标地址、网关或可执行命令。安装路径：`/Library/Application Support/SHUWiFiKeeper/direct-route.sh`、`/Library/LaunchDaemons/com.shu-net-keeper.macos-wifi.direct-route.plist`。路由变化日志：`/Library/Logs/SHUWiFiKeeper/direct-route.log`。
 
