@@ -5,7 +5,9 @@ import Foundation
 import Darwin
 
 func log(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let timestamp = formatter.string(from: Date())
     print("[\(timestamp)] \(message)")
     fflush(stdout)
 }
@@ -15,12 +17,13 @@ struct Settings: Decodable {
     let wifi_password: String?
     let attempts: Int
     let retry_seconds: Int
+    let recovery_seconds: Int
     let timeout_seconds: Int
 
     func validate() throws {
         guard !ssid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               (1...10).contains(attempts), (1...60).contains(retry_seconds),
-              (1...60).contains(timeout_seconds) else {
+              (1...60).contains(timeout_seconds), (0...120).contains(recovery_seconds) else {
             throw ServiceError.message("SSID 或重试参数无效")
         }
     }
@@ -31,6 +34,10 @@ enum ServiceError: Error, CustomStringConvertible {
     var description: String {
         switch self { case .message(let text): return text }
     }
+}
+
+func shouldRetry(nextAttempt: Int, baseAttempts: Int, recoveryDeadline: Double?, now: Double) -> Bool {
+    nextAttempt <= baseAttempts || recoveryDeadline.map { now < $0 } == true
 }
 
 // A generation invalidates queued checks on sleep, wake, or permission revocation.
@@ -73,9 +80,14 @@ final class WorkState: @unchecked Sendable {
     }
 
     func pause(seconds: Int, token: Int) -> Bool {
-        for _ in 0..<(seconds * 4) {
+        pause(duration: Double(seconds), token: token)
+    }
+
+    func pause(duration: Double, token: Int) -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + duration
+        while ProcessInfo.processInfo.systemUptime < deadline {
             if !current(token) { return false }
-            Thread.sleep(forTimeInterval: 0.25)
+            Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
         }
         return current(token)
     }
@@ -191,16 +203,23 @@ final class Service: NSObject, CLLocationManagerDelegate {
     private func schedule(reason: String) {
         guard let settings = settings else { return }
         let token = work.invalidate()
-        log("\(reason)：3 秒后检测目标 WiFi")
-        queue.asyncAfter(deadline: .now() + 3) { [self] in
+        let started = ProcessInfo.processInfo.systemUptime
+        log("\(reason)：立即检测目标 WiFi")
+        queue.async { [self] in
             guard work.current(token) else { return }
-            let code = check(settings: settings, token: token)
+            let code = check(settings: settings, token: token, started: started)
             if once && work.current(token) { exit(code) }
         }
     }
 
-    private func check(settings: Settings, token: Int) -> Int32 {
-        for attempt in 1...settings.attempts {
+    private func check(settings: Settings, token: Int, started: Double) -> Int32 {
+        func stage(_ message: String) {
+            log(String(format: "[耗时 %.3f 秒] %@", ProcessInfo.processInfo.systemUptime - started, message))
+        }
+        var attempt = 1
+        var recoveryDeadline: Double?
+        while shouldRetry(nextAttempt: attempt, baseAttempts: settings.attempts,
+                          recoveryDeadline: recoveryDeadline, now: ProcessInfo.processInfo.systemUptime) {
             guard work.current(token) else { return 1 }
             do {
                 guard let interface = CWWiFiClient.shared().interface() else {
@@ -211,7 +230,17 @@ final class Service: NSObject, CLLocationManagerDelegate {
                     return 0
                 }
                 if interface.ssid() != settings.ssid {
-                    let networks = try interface.scanForNetworks(withSSID: Data(settings.ssid.utf8))
+                    // The system WiFi menu may already have a recent scan result.
+                    // Only try the cache once; a stale entry must not trap all retries.
+                    let cached = attempt == 1 ? interface.cachedScanResults()?.filter { $0.ssid == settings.ssid } : nil
+                    let networks: Set<CWNetwork>
+                    if let cached = cached, !cached.isEmpty {
+                        networks = Set(cached)
+                        stage("使用系统缓存中的目标 WiFi")
+                    } else {
+                        stage("开始扫描目标 WiFi")
+                        networks = try interface.scanForNetworks(withSSID: Data(settings.ssid.utf8))
+                    }
                     guard work.current(token) else { return 1 }
                     let matching = networks.filter { $0.ssid == settings.ssid }
                     guard let target = matching.max(by: { $0.rssiValue < $1.rssiValue }) else {
@@ -221,24 +250,30 @@ final class Service: NSObject, CLLocationManagerDelegate {
                         // Retry briefly: the WiFi radio may still be recovering after wake.
                         throw ServiceError.message("附近未发现目标 WiFi")
                     }
-                    log("发现目标 WiFi，尝试连接（第 \(attempt) 次）")
+                    stage("发现目标 WiFi，尝试连接（第 \(attempt) 次）")
                     try interface.associate(to: target, password: settings.wifi_password)
                 }
                 guard work.current(token) else { return 1 }
+                if interface.ssid() == settings.ssid && recoveryDeadline == nil {
+                    recoveryDeadline = ProcessInfo.processInfo.systemUptime + Double(settings.recovery_seconds)
+                }
+                stage("目标 WiFi 已关联，等待 IPv4")
                 guard let name = interface.interfaceName else {
                     throw ServiceError.message("无法读取 WiFi 接口名称")
                 }
                 var ip: String?
-                for _ in 0..<15 {
+                let addressDeadline = ProcessInfo.processInfo.systemUptime + 15
+                while ProcessInfo.processInfo.systemUptime < addressDeadline {
                     guard work.current(token) else { return 1 }
                     if interface.ssid() == settings.ssid { ip = ipv4(interface: name) }
                     if ip != nil { break }
-                    guard work.pause(seconds: 1, token: token) else { return 1 }
+                    guard work.pause(duration: 0.1, token: token) else { return 1 }
                 }
                 guard let ip = ip, interface.ssid() == settings.ssid else {
                     throw ServiceError.message("目标 WiFi 尚未连接或未取得 IPv4")
                 }
                 let process = Process()
+                stage("WiFi IPv4 已就绪，开始检测／认证校园网")
                 process.executableURL = workerURL()
                 process.arguments = ["--config", configURL.path, "--ip", ip, "--interface", name]
                 process.standardOutput = FileHandle.standardOutput
@@ -247,18 +282,32 @@ final class Service: NSObject, CLLocationManagerDelegate {
                 process.waitUntilExit()
                 work.clear(process)
                 guard work.current(token) else { return 1 }
-                if process.terminationStatus == 0 { return 0 }
+                if process.terminationStatus == 0 {
+                    stage("本次检测成功完成")
+                    return 0
+                }
                 if process.terminationStatus == 2 { return 2 }
                 throw ServiceError.message("认证或网络检查暂未成功")
             } catch {
                 guard work.current(token) else { return 1 }
-                log("第 \(attempt)/\(settings.attempts) 次检测：\(error)")
+                stage("第 \(attempt) 次检测失败：\(error)")
             }
-            if attempt < settings.attempts && !work.pause(seconds: settings.retry_seconds, token: token) {
+            let next = attempt + 1
+            guard shouldRetry(nextAttempt: next, baseAttempts: settings.attempts,
+                              recoveryDeadline: recoveryDeadline, now: ProcessInfo.processInfo.systemUptime) else { break }
+            let delay: Double
+            if attempt < settings.attempts {
+                delay = min(Double(settings.retry_seconds), attempt <= 2 ? 0.25 * Double(attempt) : 1.0)
+            } else {
+                delay = min(Double(settings.retry_seconds), 2.0)
+                stage("进入网络恢复重试阶段，\(delay) 秒后继续；不会重复连接已关联的 WiFi")
+            }
+            if !work.pause(duration: delay, token: token) {
                 return 1
             }
+            attempt = next
         }
-        log("本次检测结束，等待下一次启动或唤醒")
+        stage("本次检测结束，等待下一次启动或唤醒")
         return 1
     }
 }
@@ -304,13 +353,17 @@ if arguments == ["--self-test"] {
     _ = state.invalidate()
     child.waitUntilExit()
     precondition(child.terminationReason == .uncaughtSignal)
-    let valid = Settings(ssid: "Shu(forall)", wifi_password: nil, attempts: 4, retry_seconds: 5, timeout_seconds: 10)
+    precondition(shouldRetry(nextAttempt: 4, baseAttempts: 4, recoveryDeadline: nil, now: 5))
+    precondition(!shouldRetry(nextAttempt: 5, baseAttempts: 4, recoveryDeadline: nil, now: 5))
+    precondition(shouldRetry(nextAttempt: 5, baseAttempts: 4, recoveryDeadline: 30, now: 5))
+    precondition(!shouldRetry(nextAttempt: 5, baseAttempts: 4, recoveryDeadline: 30, now: 30))
+    let valid = Settings(ssid: "Shu(ForAll)", wifi_password: nil, attempts: 4, retry_seconds: 5, recovery_seconds: 30, timeout_seconds: 10)
     try valid.validate()
     do {
-        try Settings(ssid: "", wifi_password: nil, attempts: 0, retry_seconds: 5, timeout_seconds: 10).validate()
+        try Settings(ssid: "", wifi_password: nil, attempts: 0, retry_seconds: 5, recovery_seconds: 30, timeout_seconds: 10).validate()
         fatalError("invalid configuration accepted")
     } catch { }
-    print("Swift self-test passed: event invalidation, child cancellation and configuration validation")
+    print("Swift self-test passed: event invalidation, child cancellation, bounded recovery retries and configuration validation")
     exit(0)
 }
 

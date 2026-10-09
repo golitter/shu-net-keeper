@@ -26,7 +26,13 @@ struct Config {
     wifi_password: Option<String>,
     attempts: u32,
     retry_seconds: u64,
+    #[serde(default = "default_recovery_seconds")]
+    recovery_seconds: u64,
     timeout_seconds: u64,
+}
+
+fn default_recovery_seconds() -> u64 {
+    30
 }
 
 impl Config {
@@ -44,8 +50,9 @@ impl Config {
         if !(1..=10).contains(&config.attempts)
             || !(1..=60).contains(&config.retry_seconds)
             || !(1..=60).contains(&config.timeout_seconds)
+            || config.recovery_seconds > 120
         {
-            return Err("attempts 应为 1..10，retry_seconds 和 timeout_seconds 应为 1..60".into());
+            return Err("attempts 应为 1..10，retry_seconds 和 timeout_seconds 应为 1..60，recovery_seconds 应为 0..120".into());
         }
         if config.wifi_password.as_ref().is_some_and(|p| p.is_empty()) {
             return Err("开放 WiFi 请删除或注释 wifi_password 字段".into());
@@ -195,8 +202,10 @@ fn login(config: &Config, network: &DirectNetwork) -> Result<bool> {
         }
         _ => return Err("校园网返回未知认证结果".into()),
     }
-    for _ in 0..3 {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
         if online(network, config.timeout_seconds)? {
             println!("校园网登录成功，在线状态已验证");
             return Ok(true);
@@ -207,6 +216,11 @@ fn login(config: &Config, network: &DirectNetwork) -> Result<bool> {
 
 fn run() -> Result<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["--refresh-route"] {
+        direct::request_route_refresh()?;
+        println!("已通知路由维护器检查当前 WiFi 网关（不提交认证请求）");
+        return Ok(0);
+    }
     if args.len() == 1 && args[0] == "--help" {
         println!(
             "shu-wifi-login --check-config CONFIG.toml\nshu-wifi-login --config CONFIG.toml --ip WIFI_IPV4 --interface WIFI_INTERFACE"
@@ -227,6 +241,7 @@ fn run() -> Result<i32> {
             serde_json::json!({
                 "ssid": config.ssid, "wifi_password": config.wifi_password,
                 "attempts": config.attempts, "retry_seconds": config.retry_seconds,
+                "recovery_seconds": config.recovery_seconds,
                 "timeout_seconds": config.timeout_seconds,
             })
         );
@@ -307,6 +322,15 @@ mod tests {
             );
         fs::write(&cookie.0, &valid).unwrap();
         assert!(Config::load(&cookie.0).is_ok());
+        let legacy = valid.replace("recovery_seconds = 30", "");
+        fs::write(&cookie.0, legacy).unwrap();
+        assert_eq!(Config::load(&cookie.0).unwrap().recovery_seconds, 30);
+        fs::write(
+            &cookie.0,
+            valid.replace("recovery_seconds = 30", "recovery_seconds = 121"),
+        )
+        .unwrap();
+        assert!(Config::load(&cookie.0).is_err());
         fs::write(&cookie.0, valid.replace("attempts = 4", "attempts = 0")).unwrap();
         assert!(Config::load(&cookie.0).is_err());
     }

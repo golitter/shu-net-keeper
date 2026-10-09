@@ -8,6 +8,8 @@
   </array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>15</integer>
+  <key>WatchPaths</key><array><string>/Library/Application Support/SHUWiFiKeeper/route-request</string></array>
+  <key>ThrottleInterval</key><integer>1</integer>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>/Library/Logs/SHUWiFiKeeper/direct-route.log</string>
   <key>StandardErrorPath</key><string>/Library/Logs/SHUWiFiKeeper/direct-route.log</string>

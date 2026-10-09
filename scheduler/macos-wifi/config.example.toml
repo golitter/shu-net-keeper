@@ -7,5 +7,7 @@ password = "your_campus_password"
 # wifi_password = "your_wifi_password"
 
 attempts = 4
-retry_seconds = 5
+retry_seconds = 1
+# 已关联目标 WiFi 后，允许网络恢复重试的窗口（秒）；0 禁用，省略默认 30。
+recovery_seconds = 30
 timeout_seconds = 10

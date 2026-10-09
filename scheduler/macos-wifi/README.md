@@ -1,6 +1,6 @@
 # macOS WiFi 启动／唤醒登录服务
 
-独立于 Tauri 的 macOS 后台服务。登录系统后启动，开盖唤醒时再次检测；附近存在指定 SSID 时连接 WiFi，再使用学号和校园网密码完成 ePortal 认证。WiFi 检测服务平时等待系统事件，不定时轮询；可选的特权路由维护器每 15 秒检查一次路由。
+独立于 Tauri 的 macOS 后台服务。登录系统后启动，开盖唤醒时再次检测；附近存在指定 SSID 时连接 WiFi，再使用学号和校园网密码完成 ePortal 认证。WiFi 检测服务平时等待系统事件，不定时轮询；可选的特权路由维护器接受即时刷新通知，并每 15 秒检查一次路由兜底。
 
 ## 运行方式
 
@@ -8,9 +8,9 @@
 - Rust worker 读取私有 `config.toml`，检查校园网在线状态并认证，复用仓库 `src/rsa.rs` 的 RSA 算法和 `src/constants.rs` 的门户地址。
 - 无窗口、无托盘、无 Tauri 依赖。`.app` 只是承载 macOS 权限说明和应用身份的原生包。
 - 用户级 LaunchAgent 在**用户登录桌面后**运行，不在登录前运行。关机后开机和重新启动都适用；从系统启动到用户会话建立的时间不属于连接耗时。合盖后开盖引发系统唤醒时触发；仅打开盖子而系统未睡眠不会触发。
-- 开机或唤醒后先等 3 秒，最多检测 `attempts` 次。目标 WiFi 不存在时也只进行这几次短重试，然后等待下次事件。
+- 开机或唤醒后立即检测，首先执行 `attempts` 次基础尝试。第一次优先使用系统缓存的目标网络，缓存缺失或后续重试才主动扫描。基础尝试间按 0.25、0.5、1 秒的短间隔重试；已关联目标 WiFi 时允许在恢复窗口内继续重试，避免网关尚未恢复就提前结束。一直找不到目标 WiFi 时只执行基础尝试。
 - 目标网络已连接则直接检查；附近找到目标网络但当前连接其他 WiFi 时，会切换到目标网络。WiFi 被手动关闭时跳过，不自动打开开关。
-- 等待 DHCP 最多 15 秒／次；所有门户请求有超时。已在线则不重复登录；门户明确拒绝账号认证则停止本次重试。
+- 等待 DHCP 最多 15 秒／次，每 0.1 秒重新检查。门户连接超时最多 2 秒，单次 HTTP 请求总超时由 `timeout_seconds` 控制。认证成功后立即验证，未生效时每 0.25 秒重查，最多 3 次。已在线则不重复登录；门户明确拒绝账号认证则停止本次重试。
 - 重复事件合并，所有连接／认证操作串行；睡眠时取消排队任务并终止正在执行的认证进程组。文件锁防止手动运行和 LaunchAgent 同时执行。
 
 ## 配置
@@ -41,13 +41,16 @@ password = "你的校园网密码"
 # wifi_password = "WiFi 密码"
 
 attempts = 4
-retry_seconds = 5
+retry_seconds = 1
+recovery_seconds = 30
 timeout_seconds = 10
 ```
 
-**SSID 必须从 WiFi 菜单核对，大小写、空格、全角／半角括号都必须一致。** 示例为 `Shu(ForAll)`。`attempts` 范围为 1–10，两个秒数范围为 1–60。校园网密码和 WiFi 密码是两个独立字段。暂不支持 WPA Enterprise／802.1X WiFi 连接。
+**SSID 必须从 WiFi 菜单核对，大小写、空格、全角／半角括号都必须一致。** 示例为 `Shu(ForAll)`。`attempts` 范围为 1–10，`retry_seconds` 和 `timeout_seconds` 范围为 1–60，`recovery_seconds` 范围为 0–120，省略时默认 30 秒，设为 0 可关闭恢复阶段。校园网密码和 WiFi 密码是两个独立字段。暂不支持 WPA Enterprise／802.1X WiFi 连接。
 
 私有 `config.toml` 和备份已加入本目录 `.gitignore`；请勿把真实凭据填入 `config.example.toml`。Swift 与 Rust 之间使用管道传输设置，不生成 JSON 配置文件，不将设置输出到日志。
+
+基础尝试间的实际重试间隔不超过 1 秒；超过基础次数后，恢复阶段的间隔为 `min(retry_seconds, 2)` 秒。恢复窗口从首次观察到目标 WiFi 已关联时开始计时，只允许窗口内启动额外尝试，正在执行的尝试仍使用自身的 DHCP／HTTP 超时。目标是网络已就绪时尽量在 5 秒内完成检测／连接／认证；系统扫描、关联、DHCP 和门户响应时间不受本程序控制，因此不保证所有环境都在 5 秒内成功。旧配置无需新增字段即可使用默认 30 秒恢复窗口。
 
 ## 构建和安装
 
@@ -97,7 +100,7 @@ SHU_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/bu
 
 ### VPN／代理隔离
 
-所有校园网状态检测、网关 GET、认证 POST 和登录验证都使用系统 curl，并删除大小写代理环境变量、忽略 `.curlrc`、显式设置空代理和 `--noproxy '*'`。请求绑定 `if!en0`（实际 WiFi 接口由系统查询），在线状态查询和认证提交前检查 WiFi IP 与接口专用路由。不会退回 VPN 默认路由。
+所有校园网状态检测、网关 GET、认证 POST 和登录验证都使用系统 curl，并删除大小写代理环境变量、忽略 `.curlrc`、显式设置空代理和 `--noproxy '*'`。请求绑定 `if!en0`（实际 WiFi 接口由系统查询），在线状态查询和认证提交前检查 WiFi IP、当前 DHCP 网关与接口专用路由的一致性；检查过程中租约变化会重新确认。旧网关对应的路由不能仅凭接口是 `en0` 就被判定为可用。不会退回 VPN 默认路由。
 
 VPN/TUN 若删除了 WiFi 默认路由，单独跳过 HTTP 代理不足以完成连接。安装固定目标的路由维护器：
 
@@ -106,9 +109,13 @@ sudo bash scripts/install-direct-route.sh
 launchctl kickstart -k "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
 ```
 
-维护器是 root 拥有的 LaunchDaemon，每 15 秒检查路由，无 WiFi 扫描或校园网 HTTP 请求。只维护 `10.10.9.9/32` 的 **WiFi 接口专用路由**，网关从 WiFi DHCP 自动读取；不修改 VPN 默认路由或系统代理。WiFi 接口或网关变化时自动重新检查（WiFi IP 由主服务在认证前核对）。没有可用的 WiFi 专用路由时，主服务报告明确原因并跳过认证。
+维护器是 root 拥有的 LaunchDaemon，无 WiFi 扫描或校园网 HTTP 请求。主服务发现路由与当前 DHCP 网关不一致时，修改固定的 `route-request` 通知文件；LaunchDaemon 的 `WatchPaths` 会触发即时检查，无需等待定时轮询。任务的 `ThrottleInterval` 显式设为 1 秒，避免默认启动节流叠加等待，同时每 15 秒定时检查兜底。只维护 `10.10.9.9/32` 的 **WiFi 接口专用路由**，网关从 WiFi DHCP 自动读取；不修改 VPN 默认路由或系统代理。主服务每次最多等待 3 秒让路由匹配当前网关，仍不匹配时不提交凭据，再按恢复窗口有限重试。
+
+从旧版升级时重新运行 `sudo bash scripts/install-direct-route.sh`，安装通知文件并更新 LaunchDaemon 的即时触发和启动节流设置，再运行 `bash scripts/install.sh` 更新用户级服务；源码中的任务设置不会自动更新已安装的任务。
 
 root 维护器不读取用户配置或凭据，不接受来自用户文件的目标地址、网关或可执行命令。安装路径：`/Library/Application Support/SHUWiFiKeeper/direct-route.sh`、`/Library/LaunchDaemons/com.shu-net-keeper.macos-wifi.direct-route.plist`。路由变化日志：`/Library/Logs/SHUWiFiKeeper/direct-route.log`。
+
+通知文件由 root 创建在不可由普通用户替换的目录中，只允许写入固定刷新信号，维护器不读取其内容。主服务拒绝符号链接和非 root 拥有的通知文件。手动发送通知（不认证）：`"dist/SHU WiFi Keeper.app/Contents/MacOS/shu-wifi-login" --refresh-route`。
 
 只读预览（不改变路由）：`bash scripts/direct-route.sh --dry-run`。停止路由维护并移除专用路由：`sudo bash scripts/uninstall-direct-route.sh`。如果曾安装维护器，卸载整个服务时也执行该命令。
 
@@ -143,7 +150,7 @@ launchctl kickstart -k "gui/$(id -u)/com.shu-net-keeper.macos-wifi"
 - **热点切换**：先手动连接手机热点，再触发检测。若附近存在目标 SSID，服务会切换回校园 WiFi；目标不存在时有限重试后保留现有连接。这项测试不保证产生新的认证请求。
 - **真实认证**：保持校园 WiFi 连接，在校园网门户 `http://10.10.9.9` 主动注销会话，再触发检测；预期出现“校园网登录成功，在线状态已验证”。浏览器没有服务的专用接口绑定，VPN/TUN 开启时可能无法直接访问门户。Windows 的 `logout-now.ps1` 不适用于 macOS，本版本尚未提供独立注销脚本。
 
-日志中的 `[...Z]` 时间戳为 UTC，北京时间需加 8 小时。Rust worker 的结果行没有时间戳，可结合前面的启动／唤醒记录判断所属检测。确认“发现目标 WiFi”或“请求已隔离代理”还不足以认定认证成功，应检查后续在线状态或成功记录。
+日志中的 `[...Z]` 时间戳为 UTC，精确到毫秒，北京时间需加 8 小时。阶段日志中的“耗时”从本次启动／唤醒检测被触发时开始累计，可分别看到扫描、WiFi 关联、IPv4 就绪和检测完成的时间。Rust worker 的结果行没有时间戳，但紧接着的“本次检测成功完成”会记录总耗时。确认“发现目标 WiFi”或“请求已隔离代理”还不足以认定认证成功，应检查后续在线状态或成功记录。
 
 一次完整的手动连接／登录测试，需要先停止后台服务，避免实例锁冲突：
 
@@ -185,7 +192,7 @@ sudo bash scripts/uninstall-direct-route.sh
 ## 常见问题
 
 - **“附近未发现目标 WiFi”**：核对 SSID 的大小写、空格和括号，例如 `Shu(ForAll)` 与 `Shu(ForALL)` 不同；检查定位权限和实际信号范围。
-- **“缺少校园网关的 WiFi 专用路由”**：按上面的 VPN／代理隔离步骤安装维护器，检查 `sudo launchctl print system/com.shu-net-keeper.macos-wifi.direct-route`。它是周期性单次任务，两次运行之间显示 `state = not running` 正常，应同时检查 `last exit code`。
+- **“WiFi DHCP 网关与专用路由尚未就绪或不一致”**：切换热点／校园网后可能还保留旧网关路由；服务会等待并有限重试。持续出现时按上面的 VPN／代理隔离步骤安装维护器，检查 `sudo launchctl print system/com.shu-net-keeper.macos-wifi.direct-route`。它是周期性单次任务，两次运行之间显示 `state = not running` 正常，应同时检查 `last exit code`。
 - **“校园网请求失败（curl 退出码 Some(7)）”**：连接网关失败，尚不能归因于账号密码。检查 WiFi 是否获取 IP、专用路由是否可用及本地网络权限，不要仅重复修改密码。
 - **开盖后仍显示已登录**：无需重连或重新认证。合盖多久会失去无线关联或校园网会话没有固定保证，开盖时也可能已由系统恢复连接。
 - **私有配置或日志管理**：密码仍以明文保存在受权限保护的 TOML 中，不属于加密存储；请勿分享配置。当前日志不自动轮转。

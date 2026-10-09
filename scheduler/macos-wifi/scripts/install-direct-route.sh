@@ -9,7 +9,7 @@ task_dir="$(cd "$(dirname "$0")/.." && pwd)"
 helper_dir="/Library/Application Support/SHUWiFiKeeper"
 log_dir="/Library/Logs/SHUWiFiKeeper"
 plist_path="/Library/LaunchDaemons/com.shu-net-keeper.macos-wifi.direct-route.plist"
-for path in "$helper_dir" "$log_dir" "$plist_path"; do
+for path in "$helper_dir" "$log_dir" "$plist_path" "$helper_dir/route-request"; do
   if [[ -L "$path" ]]; then
     echo "Refusing symlink installation target: $path" >&2
     exit 1
@@ -20,6 +20,9 @@ done
 /bin/launchctl bootout system/com.shu-net-keeper.macos-wifi.direct-route 2>/dev/null || true
 /usr/bin/install -d -o root -g wheel -m 755 "$helper_dir"
 /usr/bin/install -d -o root -g wheel -m 700 "$log_dir"
+# Notification only: helper never reads this file. Its parent is root-owned,
+# preventing unprivileged replacement with a symlink or another executable.
+/usr/bin/install -o root -g wheel -m 622 /dev/null "$helper_dir/route-request"
 /usr/bin/install -o root -g wheel -m 755 "$task_dir/scripts/direct-route.sh" "$helper_dir/direct-route.sh"
 /usr/bin/install -o root -g wheel -m 644 "$task_dir/route-daemon.plist" "$plist_path"
 /bin/bash "$helper_dir/direct-route.sh"
